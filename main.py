@@ -44,6 +44,54 @@ def print_grid(grid):
         print(f"{row:3}: " + " ".join(f"{value:2}" for value in values))
 
 
+def display_grid(grid, save_path="solution.png", show=True):
+    """Draw the coloring with yellow for 1 and purple for 2.
+
+    Saves a PNG to `save_path`; when `show` is True, also opens a Matplotlib
+    window. Cell values and zero-based row/column labels are shown for checking.
+    Requires Matplotlib.
+    """
+    _validate_grid(grid)
+    if any(value not in COLORS for row in grid for value in row):
+        raise ValueError("display_grid requires a complete grid containing only 1 and 2")
+
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+    from matplotlib.patches import Patch
+
+    palette = {1: "#F4D03F", 2: "#8E44AD"}
+    image = [[value - 1 for value in row] for row in grid]
+    fig, ax = plt.subplots(figsize=(12, 9))
+    ax.imshow(image, cmap=ListedColormap((palette[1], palette[2])),
+              vmin=0, vmax=1, interpolation="nearest")
+    ax.set_xticks(range(COLS), labels=range(COLS))
+    ax.set_yticks(range(ROWS), labels=range(ROWS))
+    ax.set_xticks([col - 0.5 for col in range(COLS + 1)], minor=True)
+    ax.set_yticks([row - 0.5 for row in range(ROWS + 1)], minor=True)
+    ax.grid(which="minor", color="#333333", linewidth=1.2)
+    ax.tick_params(which="minor", bottom=False, left=False)
+    ax.tick_params(top=True, labeltop=True, bottom=False, labelbottom=False)
+    ax.set_xlabel("Column (0-indexed)")
+    ax.set_ylabel("Row (0-indexed)")
+    ax.set_title("Glimmith coloring solution")
+    for row in range(ROWS):
+        for col in range(COLS):
+            text_color = "#222222" if grid[row][col] == 1 else "#FFFFFF"
+            ax.text(col, row, str(grid[row][col]), ha="center", va="center",
+                    color=text_color, fontsize=9, fontweight="bold")
+    ax.legend(handles=[
+        Patch(facecolor=palette[1], edgecolor="#333333", label="1"),
+        Patch(facecolor=palette[2], edgecolor="#333333", label="2"),
+    ], loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    fig.tight_layout()
+    if save_path:
+        fig.savefig(save_path, dpi=180, bbox_inches="tight")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
 def _validate_grid(grid):
     if len(grid) != ROWS or any(len(row) != COLS for row in grid):
         raise ValueError(f"grid must have shape {ROWS} x {COLS}")
@@ -259,16 +307,13 @@ def _connectivity_still_possible(rows):
     return True
 
 
-def solve_coloring(rose_symbols=(), required_symbols=None, max_nodes=10_000_000):
-    """Find one coloring satisfying the encoded rules.
-
-    `rose_symbols` contains (motif, row, column) entries. The search assigns
-    one row at a time and applies watchtower, fence, and connectivity pruning.
-    Returns a complete grid or None if every candidate is ruled out. Raises
-    SearchLimitExceeded if more than `max_nodes` row candidates are explored.
-    """
+def _search_colorings(rose_symbols, required_symbols, max_nodes, solution_limit):
+    """Enumerate colorings, stopping at solution_limit when it is not None."""
     if max_nodes <= 0:
         raise ValueError("max_nodes must be positive")
+    if solution_limit is not None and solution_limit <= 0:
+        raise ValueError("solution_limit must be positive or None")
+
     symbols = tuple(rose_symbols)
     motif_cells = {}
     for motif, row, col in symbols:
@@ -282,6 +327,8 @@ def solve_coloring(rose_symbols=(), required_symbols=None, max_nodes=10_000_000)
     rows = [[1] * COLS]
     explored = 0
     candidate_cache = {}
+    solutions = []
+    stopped_at_limit = False
 
     def row_candidates(row):
         if row in candidate_cache:
@@ -331,12 +378,15 @@ def solve_coloring(rose_symbols=(), required_symbols=None, max_nodes=10_000_000)
         return True
 
     def search(row):
-        nonlocal explored
+        nonlocal explored, stopped_at_limit
         if row == ROWS:
             grid = [list(values) for values in rows]
             if check_coloring(grid, symbols, required):
-                return grid
-            return None
+                solutions.append(grid)
+                if solution_limit is not None and len(solutions) >= solution_limit:
+                    stopped_at_limit = True
+                    return True
+            return False
 
         candidates = ((1,) * COLS,) if row == ROWS - 1 else row_candidates(row)
         for candidate in candidates:
@@ -351,13 +401,36 @@ def solve_coloring(rose_symbols=(), required_symbols=None, max_nodes=10_000_000)
             if (_check_fences_in_row(rows, row - 1, FENCES)
                     and rose_pairs_still_possible(row)
                     and _connectivity_still_possible(rows)):
-                result = search(row + 1)
-                if result is not None:
-                    return result
+                if search(row + 1):
+                    rows.pop()
+                    return True
             rows.pop()
-        return None
+        return False
 
-    return search(1)
+    search(1)
+    return solutions, not stopped_at_limit
+
+
+def solve_coloring(rose_symbols=(), required_symbols=None, max_nodes=10_000_000):
+    """Find one coloring satisfying the encoded rules, or return None."""
+    solutions, _ = _search_colorings(
+        rose_symbols, required_symbols, max_nodes, solution_limit=1
+    )
+    return solutions[0] if solutions else None
+
+
+def count_colorings(rose_symbols=(), required_symbols=None,
+                    max_nodes=10_000_000, stop_after=2):
+    """Count solutions, returning (count, exhaustive).
+
+    `stop_after=2` is enough to prove a puzzle is not unique. A result of one
+    is a uniqueness proof only when exhaustive is True; use stop_after=None
+    to exhaust the full search space.
+    """
+    solutions, exhaustive = _search_colorings(
+        rose_symbols, required_symbols, max_nodes, solution_limit=stop_after
+    )
+    return len(solutions), exhaustive
 
 
 if __name__ == "__main__":
@@ -370,3 +443,4 @@ if __name__ == "__main__":
             print("No coloring satisfies the encoded clues.")
         else:
             print_grid(solution)
+            display_grid(solution, save_path="solution.png", show=True)
