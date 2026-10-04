@@ -9,8 +9,7 @@ ROWS, COLS = 11, 12
 COLORS = (1, 2)
 COLOR_2_WAYPOINTS = ((1, 1), (1, 10), (9, 1), (9, 10))
 
-# Entries are copied from the original notes as (s, row, column).
-# Their shape semantics are being wired into check_fences separately.
+# Each entry is (required number of unlike-color boundary edges, row, column).
 FENCES = (
     (1, 1, 3), (3, 1, 6), (1, 2, 8), (1, 3, 2),
     (1, 3, 5), (3, 4, 8), (1, 4, 10), (1, 5, 4),
@@ -100,6 +99,27 @@ def check_watchtowers(grid):
     return True
 
 
+def check_fences(grid, clues=FENCES):
+    """Check the exact number of color boundaries around each fence cell.
+
+    For a clue (style, row, col), count orthogonally adjacent cells whose
+    color differs from the clue cell. Each such unlike-color side is one edge.
+    Neighbors beyond the board are not counted.
+    """
+    _validate_grid(grid)
+    for style, row, col in clues:
+        if not (0 <= row < ROWS and 0 <= col < COLS):
+            raise ValueError(f"fence coordinate {(row, col)} is outside the grid")
+        center_color = grid[row][col]
+        boundary_edges = sum(
+            grid[next_row][next_col] != center_color
+            for next_row, next_col in _neighbors(row, col)
+        )
+        if boundary_edges != style:
+            return False
+    return True
+
+
 def check_rose_windows(grid, symbols, required_symbols=None):
     """Require every region to contain exactly one of each rose-window motif.
 
@@ -148,6 +168,8 @@ def check_coloring(grid, rose_symbols=(), required_symbols=None):
     if any(grid[row][col] != 2 for row, col in COLOR_2_WAYPOINTS):
         return False
     if not check_watchtowers(grid):
+        return False
+    if not check_fences(grid):
         return False
     if any(len(color_components(grid, color)) != 1 for color in COLORS):
         return False
