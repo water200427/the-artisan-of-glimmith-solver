@@ -9,6 +9,15 @@ ROWS, COLS = 11, 12
 COLORS = (1, 2)
 COLOR_2_WAYPOINTS = ((1, 1), (1, 10), (9, 1), (9, 10))
 
+# Entries are copied from the original notes as (s, row, column).
+# Their shape semantics are being wired into check_fences separately.
+FENCES = (
+    (1, 1, 3), (3, 1, 6), (1, 2, 8), (1, 3, 2),
+    (1, 3, 5), (3, 4, 8), (1, 4, 10), (1, 5, 4),
+    (1, 5, 7), (3, 6, 1), (3, 6, 3), (3, 7, 6),
+    (1, 7, 9), (1, 8, 3), (3, 9, 5), (3, 9, 8),
+)
+
 
 def make_grid(value=0):
     """Create an 11 x 12 coloring grid."""
@@ -74,6 +83,23 @@ def color_components(grid, color):
     return components
 
 
+def check_watchtowers(grid):
+    """Every 2 x 2 cell block must contain both colors.
+
+    This is the full-board form of the screenshot's watchtower rule: no
+    lattice point may touch four cells belonging to one and the same region.
+    """
+    _validate_grid(grid)
+    for row in range(ROWS - 1):
+        for col in range(COLS - 1):
+            color = grid[row][col]
+            if (grid[row][col + 1] == color
+                    and grid[row + 1][col] == color
+                    and grid[row + 1][col + 1] == color):
+                return False
+    return True
+
+
 def check_rose_windows(grid, symbols, required_symbols=None):
     """Require every region to contain exactly one of each rose-window motif.
 
@@ -120,6 +146,8 @@ def check_coloring(grid, rose_symbols=(), required_symbols=None):
             if (row in (0, ROWS - 1) or col in (0, COLS - 1)) and grid[row][col] != 1:
                 return False
     if any(grid[row][col] != 2 for row, col in COLOR_2_WAYPOINTS):
+        return False
+    if not check_watchtowers(grid):
         return False
     if any(len(color_components(grid, color)) != 1 for color in COLORS):
         return False
