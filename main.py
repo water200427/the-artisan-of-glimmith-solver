@@ -323,6 +323,108 @@ def check_candidate(horizontal_edges, vertical_edges,
             and check_fence_shapes(cell_regions, fence_shapes))
 
 
+class SearchLimitExceeded(RuntimeError):
+    """Raised when path search reaches its configured node limit."""
+
+
+def path_to_edges(path):
+    """Convert a sequence of lattice points into horizontal/vertical edge grids."""
+    horizontal = [[False] * (POINT_COLS - 1) for _ in range(POINT_ROWS)]
+    vertical = [[False] * POINT_COLS for _ in range(POINT_ROWS - 1)]
+    if len(path) < 2 or len(set(path)) != len(path):
+        raise ValueError("path must contain at least two distinct lattice points")
+    for (row1, col1), (row2, col2) in zip(path, path[1:]):
+        if not (0 <= row1 < POINT_ROWS and 0 <= col1 < POINT_COLS
+                and 0 <= row2 < POINT_ROWS and 0 <= col2 < POINT_COLS):
+            raise ValueError("path contains a point outside the lattice")
+        if row1 == row2 and abs(col1 - col2) == 1:
+            horizontal[row1][min(col1, col2)] = True
+        elif col1 == col2 and abs(row1 - row2) == 1:
+            vertical[min(row1, row2)][col1] = True
+        else:
+            raise ValueError(f"consecutive path points {(row1, col1)} and {(row2, col2)} are not adjacent")
+    return horizontal, vertical
+
+
+def _lattice_neighbors(point):
+    row, col = point
+    for next_point in ((row - 1, col), (row, col + 1),
+                       (row + 1, col), (row, col - 1)):
+        next_row, next_col = next_point
+        if 0 <= next_row < POINT_ROWS and 0 <= next_col < POINT_COLS:
+            yield next_point
+
+
+def _can_reach_end(current, end, visited):
+    """Check reachability through unused points plus the current point."""
+    reached = {current}
+    stack = [current]
+    while stack:
+        point = stack.pop()
+        for neighbor in _lattice_neighbors(point):
+            if neighbor == end or (neighbor not in visited and neighbor not in reached):
+                if neighbor == end:
+                    return True
+                reached.add(neighbor)
+                stack.append(neighbor)
+    return current == end
+
+
+def solve_path(start=(0, 0), end=(POINT_ROWS - 1, POINT_COLS - 1),
+               rose_symbols=(), required_symbols=None, fence_shapes=(),
+               max_nodes=1_000_000):
+    """Find the first route satisfying the supplied clues.
+
+    Returns a list of (row, column) lattice points, or None if the search
+    exhausts all routes. Raises SearchLimitExceeded if `max_nodes` is reached.
+    Pass the complete rose-window and fence clue data for a meaningful solve;
+    omitting them intentionally leaves those clue families unconstrained.
+    """
+    for point in (start, end):
+        row, col = point
+        if not (0 <= row < POINT_ROWS and 0 <= col < POINT_COLS):
+            raise ValueError(f"endpoint {point} is outside the lattice")
+    if start == end:
+        raise ValueError("start and end must be different lattice points")
+    if max_nodes <= 0:
+        raise ValueError("max_nodes must be positive")
+
+    path = [start]
+    visited = {start}
+    explored = 0
+
+    def search(current):
+        nonlocal explored
+        explored += 1
+        if explored > max_nodes:
+            raise SearchLimitExceeded(
+                f"search exceeded {max_nodes:,} nodes without completing"
+            )
+        if current == end:
+            horizontal, vertical = path_to_edges(path)
+            if check_candidate(horizontal, vertical, start, end,
+                               rose_symbols, required_symbols, fence_shapes):
+                return path.copy()
+            return None
+
+        candidates = sorted(
+            (point for point in _lattice_neighbors(current) if point not in visited),
+            key=lambda point: abs(point[0] - end[0]) + abs(point[1] - end[1]),
+        )
+        for point in candidates:
+            visited.add(point)
+            path.append(point)
+            if _can_reach_end(point, end, visited):
+                result = search(point)
+                if result is not None:
+                    return result
+            path.pop()
+            visited.remove(point)
+        return None
+
+    return search(start)
+
+
 if __name__ == "__main__":
     regions = make_cell_grid()
     horizontal = [[False] * (POINT_COLS - 1) for _ in range(POINT_ROWS)]
