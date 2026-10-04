@@ -58,6 +58,95 @@ def _validate_edge_grids(horizontal_edges, vertical_edges):
         raise ValueError(f"vertical_edges must have shape {POINT_ROWS - 1} x {POINT_COLS}")
 
 
+def _edge_neighbors(horizontal_edges, vertical_edges, point):
+    """Return lattice points connected to point by a drawn segment."""
+    row, col = point
+    neighbors = []
+    if col > 0 and horizontal_edges[row][col - 1]:
+        neighbors.append((row, col - 1))
+    if col < POINT_COLS - 1 and horizontal_edges[row][col]:
+        neighbors.append((row, col + 1))
+    if row > 0 and vertical_edges[row - 1][col]:
+        neighbors.append((row - 1, col))
+    if row < POINT_ROWS - 1 and vertical_edges[row][col]:
+        neighbors.append((row + 1, col))
+    return neighbors
+
+
+def check_single_path(horizontal_edges, vertical_edges,
+                      start=(0, 0), end=(POINT_ROWS - 1, POINT_COLS - 1)):
+    """Check that drawn segments form one simple path from start to end.
+
+    Unused lattice points have degree zero, the two endpoints degree one, and
+    every other used point degree two. This rejects branches and cycles.
+    """
+    _validate_edge_grids(horizontal_edges, vertical_edges)
+    for point in (start, end):
+        row, col = point
+        if not (0 <= row < POINT_ROWS and 0 <= col < POINT_COLS):
+            raise ValueError(f"endpoint {point} is outside the lattice")
+    if start == end:
+        raise ValueError("start and end must be different lattice points")
+
+    used_points = set()
+    for row in range(POINT_ROWS):
+        for col in range(POINT_COLS):
+            point = (row, col)
+            degree = len(_edge_neighbors(horizontal_edges, vertical_edges, point))
+            if degree:
+                used_points.add(point)
+            expected = 1 if point in (start, end) else (2 if degree else 0)
+            if degree != expected:
+                return False
+    if start not in used_points or end not in used_points:
+        return False
+
+    reached = {start}
+    stack = [start]
+    while stack:
+        point = stack.pop()
+        for neighbor in _edge_neighbors(horizontal_edges, vertical_edges, point):
+            if neighbor not in reached:
+                reached.add(neighbor)
+                stack.append(neighbor)
+    return reached == used_points and end in reached
+
+
+def find_cell_regions(horizontal_edges, vertical_edges):
+    """Label cells by connected region, treating drawn segments as walls.
+
+    Returns a 10 x 11 matrix of integer region IDs, numbered from zero.
+    This can be used directly by check_watchtowers.
+    """
+    _validate_edge_grids(horizontal_edges, vertical_edges)
+    regions = [[None] * CELL_COLS for _ in range(CELL_ROWS)]
+    region_id = 0
+    for start_row in range(CELL_ROWS):
+        for start_col in range(CELL_COLS):
+            if regions[start_row][start_col] is not None:
+                continue
+            regions[start_row][start_col] = region_id
+            stack = [(start_row, start_col)]
+            while stack:
+                row, col = stack.pop()
+                # Neighboring cells are separated by the lattice edge they share.
+                candidates = []
+                if row > 0 and not horizontal_edges[row][col]:
+                    candidates.append((row - 1, col))
+                if row < CELL_ROWS - 1 and not horizontal_edges[row + 1][col]:
+                    candidates.append((row + 1, col))
+                if col > 0 and not vertical_edges[row][col]:
+                    candidates.append((row, col - 1))
+                if col < CELL_COLS - 1 and not vertical_edges[row][col + 1]:
+                    candidates.append((row, col + 1))
+                for next_row, next_col in candidates:
+                    if regions[next_row][next_col] is None:
+                        regions[next_row][next_col] = region_id
+                        stack.append((next_row, next_col))
+            region_id += 1
+    return regions
+
+
 def check_watchtowers(cell_regions, clues=WATCHTOWERS):
     """Check each tower's count of distinct regions touching its lattice point.
 
@@ -116,6 +205,17 @@ def check_local_rules(cell_regions, horizontal_edges, vertical_edges):
     """Check watchtowers and ring clues on a complete candidate board."""
     return (check_watchtowers(cell_regions)
             and check_rings(horizontal_edges, vertical_edges))
+
+
+def check_candidate(horizontal_edges, vertical_edges,
+                    start=(0, 0), end=(POINT_ROWS - 1, POINT_COLS - 1)):
+    """Check path shape, ring clues, and watchtowers for a complete route."""
+    if not check_single_path(horizontal_edges, vertical_edges, start, end):
+        return False
+    if not check_rings(horizontal_edges, vertical_edges):
+        return False
+    cell_regions = find_cell_regions(horizontal_edges, vertical_edges)
+    return check_watchtowers(cell_regions)
 
 
 if __name__ == "__main__":
