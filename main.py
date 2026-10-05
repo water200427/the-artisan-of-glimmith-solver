@@ -141,10 +141,15 @@ def check_watchtowers(grid):
     _validate_grid(grid)
     for row in range(ROWS - 1):
         for col in range(COLS - 1):
-            color = grid[row][col]
-            if (grid[row][col + 1] == color
-                    and grid[row + 1][col] == color
-                    and grid[row + 1][col + 1] == color):
+            top_left = grid[row][col]
+            top_right = grid[row][col + 1]
+            bottom_left = grid[row + 1][col]
+            bottom_right = grid[row + 1][col + 1]
+            monochrome = top_left == top_right == bottom_left == bottom_right
+            checkerboard = (top_left == bottom_right
+                            and top_right == bottom_left
+                            and top_left != top_right)
+            if monochrome or checkerboard:
                 return False
     return True
 
@@ -234,7 +239,12 @@ class SearchLimitExceeded(RuntimeError):
 
 def _has_mixed_2x2(upper, lower):
     return all(
-        not (upper[col] == upper[col + 1] == lower[col] == lower[col + 1])
+        not (
+            upper[col] == upper[col + 1] == lower[col] == lower[col + 1]
+            or (upper[col] == lower[col + 1]
+                and upper[col + 1] == lower[col]
+                and upper[col] != upper[col + 1])
+        )
         for col in range(COLS - 1)
     )
 
